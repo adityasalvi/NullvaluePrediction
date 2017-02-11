@@ -1,0 +1,187 @@
+import MySQLdb,os,csv,sys,sqlalchemy
+from flask import Flask,render_template,request,url_for,redirect
+from werkzeug import secure_filename
+application = Flask(__name__)
+
+db = MySQLdb.connect(host='localhost', port=3306, db='dbproject2', user='root',passwd='')
+cursor=db.cursor()
+
+
+#modifylist=[]
+
+upload_folder=os.path.dirname(__file__)+'/uploads'
+allowed_extensions = set(['csv'])
+application.config['UPLOAD_FOLDER'] = upload_folder
+
+@application.route('/')
+def mainpage():
+    
+#    modifylist = [q for q in os.listdir(upload_folder)]
+    return render_template('main.html')#,f=modifylist)
+
+@application.route('/modify',methods=['GET','POST'])
+def modify():
+    #modifylist = [q for q in os.listdir(upload_folder)]
+    if request.method == 'POST':
+    #filename = request.form['fname']
+        os.startfile(upload_folder+'/test.csv')
+    return render_template('main.html')#,f=modifylist)
+@application.route('/upload',methods=['GET','POST'])
+def upload():
+    #modifylist = [q for q in os.listdir(upload_folder)]
+    if request.method == 'POST':
+        file = request.files['iname']
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file.save(os.path.join(application.config['UPLOAD_FOLDER'], filename))
+    
+    return render_template('main.html')#,f=modifylist)
+ 
+@application.route('/view',methods=['GET','POST'])
+def view():
+    #modifylist = [q for q in os.listdir(upload_folder)]
+    table=[]
+    column_names=[]
+    tuple_values=[]
+    
+    if request.method == 'POST':
+        f=open('uploads/test.csv','r')
+        line=csv.reader(f)
+        for row in line:
+            for values in row:
+                column_names.append(values)
+            break
+        f.close()
+        columns=','.join("%s varchar(10)"% a for a in column_names)
+    
+        cursor.execute("show tables from dbproject2")
+        results=cursor.fetchall()
+        tname="test"
+        if(results):
+            for b in results:
+                for d in b:
+                    table.append(d)
+
+        if tname not in table:
+            cursor.execute("create table test (id int not null primary key auto_increment,%s)"%(columns))
+
+            f=open('uploads/test.csv','r')
+            next(f)
+            line=csv.reader(f)
+            for rows in line:
+                tuple_values.append(rows)
+            f.close()
+            columns=','.join(column_names)
+
+            for tuple in tuple_values:
+                tuples=','.join("'%s'"% a for a in tuple)
+                sql1="insert into test (%s) values (%s)"%(columns,tuples)
+                cursor.execute(sql1)
+                db.commit()
+        else:
+            cursor.execute("drop table test")
+            columns=','.join("%s varchar(10)"% a for a in column_names)
+            cursor.execute("create table test (id int not null primary key auto_increment,%s)"%(columns))
+#            cursor.execute("truncate table test")
+            f=open('uploads/test.csv','r')
+            next(f)
+            line=csv.reader(f)
+            for rows in line:
+                tuple_values.append(rows)
+            f.close()
+            columns=','.join(column_names)
+
+            for tuple in tuple_values:
+                tuples=','.join("'%s'"% a for a in tuple)
+                sql1="insert into test (%s) values (%s)"%(columns,tuples)
+                cursor.execute(sql1)
+                db.commit()
+    return render_template('main.html',status='1',columns=column_names,tuples=tuple_values)#,f=modifylist)
+
+@application.route('/predict',methods=['GET','POST'])
+def predict():
+    #modifylist = [q for q in os.listdir(upload_folder)]
+    list = []
+    list1 = []
+    list2 = []
+    list3 = []
+    confidence={}
+    tuple_values=[]
+    if request.method == 'POST':
+        mins=float(request.form['mins'])
+        minc=float(request.form['minc'])
+        cursor.execute('select column_name from information_schema.columns where table_name="test" and column_name!="id"')
+        temp=cursor.fetchall()
+        for t in temp:
+            for te in t:
+                list.append(te)
+
+        for i in list:
+            for k in list:
+                if(i!=k):
+                   query = 'select "%s","%s",a1,a2,concat("%s(",a1,")"),concat("%s(",a2,")"),s,c from (select %s as a1,%s as a2,(count(%s)/(select count(%s) from test)) as s,count(%s)/(select count(%s) from test where %s=a1) as c from test where %s!="" and %s!="" group by %s,%s) as w where s>=%s and c>=%s  order by c desc'%(i,k,i,k,i,k,i,i,i,i,i,i,k,i,k,mins,minc) 
+                   cursor.execute(query)
+                   new=cursor.fetchall()
+                   list1.append(new)
+                   
+        for f in list1:
+            for q in f:
+                list2.append(q)
+        list2=sorted(list2,key=lambda tup:tup[7],reverse=True)
+        for i in list2:
+            query = 'insert into rules (antecedent,consequent,av,cv,support,confidence) values("%s","%s",%s,%s,%s,%s)'%(i[0],i[1],i[2],i[3],i[6],i[7])
+            cursor.execute(query)
+            db.commit()
+        columns=','.join("%s"% a for a in list)
+        
+        engine = sqlalchemy.create_engine('mysql://root@localhost/dbproject2')
+        cursorf=engine.connect()
+        
+        for i in list:
+            
+            query = 'select * from test where %s=""'%(i)
+            results=cursorf.execute(query)
+            
+            query1 = 'select antecedent,consequent,av,cv from rules'
+            cursor.execute(query1)
+            results1=cursor.fetchall()
+            
+            for e in results:
+                for j in results1:
+                    print j
+                    if(e[j[0]]==j[2] and  e[j[1]]==j[3]):
+                        query2='select a from (select distinct(%s) as a,count(%s) as b from test where %s=%s and %s=%s group by %s) as t where b=(select max(b) from (select distinct(%s) as a,count(%s) as b from test where %s=%s and %s=%s group by %s) t1);'%(i,i,j[0],j[2],j[1],j[3],i,i,i,j[0],j[2],j[1],j[3],i)
+                        cursor.execute(query2)
+                        results2=cursor.fetchall()
+                        if(results2):
+                            for r in results2:
+                                if(r[0]):
+                                    query3='update test set %s=%s where %s="" and %s=%s and %s=%s'%(i,r[0],i,j[0],j[2],j[1],j[3])
+                                    print query3
+                                    cursor.execute(query3)
+                                    db.commit()
+                        break
+        query4='truncate table rules'
+        cursor.execute(query4)
+        cursorf.close()
+#    return render_template('main.html',l=list2)
+        cursor.execute("select * from test")
+        temp1=cursor.fetchall()
+        
+        for c in temp1:
+            tuple_values.append(c)
+        cursor.execute('select column_name from information_schema.columns where table_name="test"')
+        temp=cursor.fetchall()
+        list=[]
+        for t in temp:
+            for te in t:
+                list.append(te)
+    return render_template('main.html',status='1',columns=list,tuples=tuple_values,l=list2)#,f=modifylist)
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1] in allowed_extensions
+
+if __name__ == "__main__":
+    
+    application.debug=True
+    application.run()
